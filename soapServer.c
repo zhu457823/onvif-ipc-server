@@ -56,6 +56,12 @@ SOAP_FMAC5 int SOAP_FMAC6 soap_serve(struct soap *soap)
 SOAP_FMAC5 int SOAP_FMAC6 soap_serve_request(struct soap *soap)
 {
 	(void)soap_peek_element(soap);
+
+	if (soap)
+	{
+		printf("soap->tag = %s\n", soap->tag);
+	}
+	
 	if (!soap_match_tag(soap, soap->tag, "SOAP-ENV:Fault"))
 		return soap_serve_SOAP_ENV__Fault(soap);
 	if (!soap_match_tag(soap, soap->tag, "wsdd:Hello"))
