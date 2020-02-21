@@ -11,4 +11,6 @@
 #define ONVIF_UDP_IP "239.255.255.250"
 #define ONVIF_TCP_IP "192.168.189.129"
 
+int get_ip_of_if(const char *if_name, int af, char *IP);
+
 
