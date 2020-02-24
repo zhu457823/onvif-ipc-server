@@ -15,6 +15,7 @@
 #include "soapH.h"
 
 char LocalIp[64] = { 0x0 };
+char LocalMac[64] = { 0x0 };
 
 /*
 * @brief 加入组播组，监听组播报文，实现设备发现功能
@@ -89,6 +90,7 @@ static void* OnvifWebServices(void* arg)
 	tcpsersoap.bind_flags = SO_REUSEADDR;//socket 地址复用
 	soap_set_namespaces(&tcpsersoap, namespaces);
 
+	printf("local ip %s   ONVIF_TCP_IP is %s\n", LocalIp, ONVIF_TCP_IP);
 	//tcpfd = soap_bind(&tcpsersoap, ONVIF_TCP_IP, ONVIF_TCP_PORT, 10);
 	tcpfd = soap_bind(&tcpsersoap, LocalIp, ONVIF_TCP_PORT, 10);
 	if (!soap_valid_socket(tcpfd))
@@ -138,6 +140,7 @@ int main(int argc, char *argv[])
 	pthread_t udpserverthread = 0;
 	pthread_t tcpserverthread = 0;
 	char ip[64] = { 0x0 };
+	char mac_addr[6] = { 0x0 };
 	int ret = -1;
 
 	if (argc != 2)
@@ -154,6 +157,15 @@ int main(int argc, char *argv[])
 	}
 	printf("ifname %s ip %s\n", argv[1], ip);
 	memcpy(LocalIp, ip, strlen(ip));
+
+	ret = get_mac_of_if(argv[1], mac_addr, 6);
+	if (0 != ret)
+	{
+		printf("get local interface mac failed!\n");
+		return -1;
+	}
+	ret = macaddr2str(mac_addr, LocalMac, 64);
+	printf("ifname %s mac %s\n", argv[1], LocalMac);
 
 	pthread_create(&udpserverthread, NULL, OnvifDiscovered, NULL);
 	pthread_create(&tcpserverthread, NULL, OnvifWebServices, NULL);

@@ -18,6 +18,12 @@
 #include "wsseapi.h"
 #include <sys/types.h>
 #include <ifaddrs.h>
+#include <sys/ioctl.h>
+#include <netinet/in.h>
+#include <net/if.h>
+
+extern char LocalIp[64];
+extern char LocalMac[64];
 
 /*
 * des:   get_ip_of_if function returns IP-address in
@@ -97,6 +103,76 @@ int get_ip_of_if(const char *if_name, int af, char *IP)
 	return result;
 }
 
+/*@brief 获取接口的mac地址*/
+int get_mac_of_if(const char *if_name, char *mac_addr, int mac_len)
+{
+	int sockfd = 0;
+	struct ifreq tmp;
+	int i = 0;
+	
+	/*Sanity check*/
+	if (NULL == if_name || NULL == mac_addr)
+	{
+		printf("param meters is NULL!\n");
+		return -1;
+	}
+
+	sockfd = socket(AF_INET, SOCK_STREAM, 0);
+	if (sockfd < 0)
+	{
+		printf("create socket failed, %s",strerror(errno));
+		return -1;
+	}
+
+	memset(&tmp, 0x0, sizeof(struct ifreq));
+	strncpy(tmp.ifr_name, if_name, sizeof(tmp.ifr_name)-1);
+	if (ioctl(sockfd, SIOCGIFHWADDR, &tmp) < 0)
+	{
+		printf("ioctl get mac failed!\n");
+		close(sockfd);
+		return -1;
+	}
+
+#if 0
+	snprintf(mac_addr, mac_len-1, "%02x:%02x:%02x:%02x:%02x:%02x",
+		(unsigned char)tmp.ifr_hwaddr.sa_data[0],
+		(unsigned char)tmp.ifr_hwaddr.sa_data[1],
+		(unsigned char)tmp.ifr_hwaddr.sa_data[2],
+		(unsigned char)tmp.ifr_hwaddr.sa_data[3],
+		(unsigned char)tmp.ifr_hwaddr.sa_data[4],
+		(unsigned char)tmp.ifr_hwaddr.sa_data[5]);
+#endif
+
+	for (i = 0; i < 6; i++)
+	{
+		mac_addr[i] = (unsigned char)tmp.ifr_hwaddr.sa_data[i];
+	}
+
+	//printf("ifname %s mac %s\n", if_name, mac_addr);
+	close(sockfd);
+	return 0;
+}
+
+int macaddr2str(char *mac_addr, char *mac_str, int mac_len)
+{
+	if (NULL == mac_addr || NULL == mac_str)
+	{
+		printf("para meter is NULL!\n");
+		return -1;
+	}
+
+	snprintf(mac_str, mac_len - 1, "%02x:%02x:%02x:%02x:%02x:%02x",
+		(unsigned char)mac_addr[0],
+		(unsigned char)mac_addr[1],
+		(unsigned char)mac_addr[2],
+		(unsigned char)mac_addr[3],
+		(unsigned char)mac_addr[4],
+		(unsigned char)mac_addr[5]);
+
+	return 0;
+}
+
+
 /******************************************************************************\
  *                                                                            *
  * Server-Side Operations                                                     *
@@ -112,10 +188,12 @@ SOAP_FMAC5 int SOAP_FMAC6 SOAP_ENV__Fault(struct soap* soap, char *faultcode, ch
 }
 
 /*
-* @brief 设备处于Discoverable模式，联网后，需要主动发送hello报文
+* @brief 设备默认处于Discoverable模式，联网后，需要主动发送hello报文
 */
 SOAP_FMAC5 int SOAP_FMAC6 __wsdd__Hello(struct soap* soap, struct wsdd__HelloType *wsdd__Hello)
 {	
+	int ret = -1;
+	//ret = soap_send___wsdd__Hello();
 	return SOAP_OK;
 }
 
@@ -138,9 +216,10 @@ SOAP_FMAC5 int SOAP_FMAC6 __wsdd__Probe(struct soap* soap, struct wsdd__ProbeTyp
     printf("---------------------------------------------\n");
     char                            ip_addr[32] = { 0 };
     char                            mac_addr[13] = { 0 };
-    struct wsdd__ScopesType* pScopes = NULL;
+    struct wsdd__ScopesType			*pScopes = NULL;
     char                            str_tmp[256] = { 0 };
 
+	/*scope message需要根据实际信息填充*/
     char scopes_message[] =
         "onvif://www.onvif.org/type/NetworkVideoTransmitter\r\n"
         "onvif://www.onvif.org/Profile/Streaming\r\n"
@@ -152,7 +231,7 @@ SOAP_FMAC5 int SOAP_FMAC6 __wsdd__Probe(struct soap* soap, struct wsdd__ProbeTyp
 
     sprintf(ip_addr, "%u.%u.%u.%u", ((soap->ip) >> 24) & 0xFF,
 		((soap->ip) >> 16) & 0xFF, ((soap->ip) >> 8) & 0xFF, (soap->ip) & 0xFF);
-    sprintf(mac_addr, "000c29c9338f");
+    //sprintf(mac_addr, "000c29c9338f");
 
     // verify scropes
     if (wsdd__Probe->Scopes && wsdd__Probe->Scopes->__item)
@@ -169,9 +248,9 @@ SOAP_FMAC5 int SOAP_FMAC6 __wsdd__Probe(struct soap* soap, struct wsdd__ProbeTyp
 
     // response Probe Message
     struct wsdd__ProbeMatchesType   wsdd__ProbeMatches = { 0 };
-    struct wsdd__ProbeMatchType* pProbeMatchType = NULL;
-    struct wsa__Relationship* pWsa__RelatesTo = NULL;
-    char* pMessageID = NULL;
+    struct wsdd__ProbeMatchType	*pProbeMatchType = NULL;
+    struct wsa__Relationship	*pWsa__RelatesTo = NULL;
+    char	*pMessageID = NULL;
 
     pProbeMatchType = (struct wsdd__ProbeMatchType*)soap_malloc(soap, sizeof(struct wsdd__ProbeMatchType));
 	if (NULL == pProbeMatchType)
@@ -181,7 +260,8 @@ SOAP_FMAC5 int SOAP_FMAC6 __wsdd__Probe(struct soap* soap, struct wsdd__ProbeTyp
     soap_default_wsdd__ProbeMatchType(soap, pProbeMatchType);
 
 	//这里需要动态获取设备的ip地址，不是个定值
-    sprintf(str_tmp, "http://%s:%d/onvif/device_service", ONVIF_TCP_IP, ONVIF_TCP_PORT);
+    //sprintf(str_tmp, "http://%s:%d/onvif/device_service", ONVIF_TCP_IP, ONVIF_TCP_PORT);
+	sprintf(str_tmp, "http://%s:%d/onvif/device_service", LocalIp, ONVIF_TCP_PORT);
     pProbeMatchType->XAddrs = soap_strdup(soap, str_tmp);
 	if (wsdd__Probe->Types && strlen(wsdd__Probe->Types))
 	{
@@ -225,9 +305,16 @@ SOAP_FMAC5 int SOAP_FMAC6 __wsdd__Probe(struct soap* soap, struct wsdd__ProbeTyp
     soap->header->wsa__Action = soap_strdup(soap, "http://schemas.xmlsoap.org/ws/2005/04/discovery/ProbeMatches");
     soap->header->wsa__To = soap_strdup(soap, "http://schemas.xmlsoap.org/ws/2004/08/addressing/role/anonymous");
 
-    soap_send___wsdd__ProbeMatches(soap, "http://", NULL, &wsdd__ProbeMatches);
-
-    return SOAP_OK;	
+	if (SOAP_OK == soap_send___wsdd__ProbeMatches(soap, "http://", NULL, &wsdd__ProbeMatches))
+	{
+		printf("send probe matches success!\n");
+		return SOAP_OK;
+	}
+	else
+	{
+		printf("soap error:%d %s %s\n", soap->error, *soap_faultcode(soap), *soap_faultstring(soap));
+		return soap->error;
+	}   
 }
 
 
@@ -488,13 +575,22 @@ SOAP_FMAC5 int SOAP_FMAC6 __tds__RemoveScopes(struct soap* soap, struct _tds__Re
 	return SOAP_OK;
 }
 /** Web service operation '__tds__GetDiscoveryMode' implementation, should return SOAP_OK or error code */
-SOAP_FMAC5 int SOAP_FMAC6 __tds__GetDiscoveryMode(struct soap* soap, struct _tds__GetDiscoveryMode *tds__GetDiscoveryMode, struct _tds__GetDiscoveryModeResponse *tds__GetDiscoveryModeResponse)
+SOAP_FMAC5 int SOAP_FMAC6 __tds__GetDiscoveryMode(struct soap* soap, struct _tds__GetDiscoveryMode *tds__GetDiscoveryMode,
+				struct _tds__GetDiscoveryModeResponse *tds__GetDiscoveryModeResponse)
 {
+	printf("---------------__tds__GetDiscoveryMode---------------\n");
+	//设备端默认是discoverable模式
+	//tds__GetDiscoveryModeResponse->DiscoveryMode = tt__DiscoveryMode__NonDiscoverable;
+	tds__GetDiscoveryModeResponse->DiscoveryMode = tt__DiscoveryMode__Discoverable;
+
 	return SOAP_OK;
 }
 /** Web service operation '__tds__SetDiscoveryMode' implementation, should return SOAP_OK or error code */
-SOAP_FMAC5 int SOAP_FMAC6 __tds__SetDiscoveryMode(struct soap* soap, struct _tds__SetDiscoveryMode *tds__SetDiscoveryMode, struct _tds__SetDiscoveryModeResponse *tds__SetDiscoveryModeResponse)
+SOAP_FMAC5 int SOAP_FMAC6 __tds__SetDiscoveryMode(struct soap* soap, struct _tds__SetDiscoveryMode *tds__SetDiscoveryMode, 
+	struct _tds__SetDiscoveryModeResponse *tds__SetDiscoveryModeResponse)
 {
+	printf("---------------__tds__SetDiscoveryMode---------------\n");
+	printf("set wsdd mode is %d[0:Discoverable 1:NonDiscoverable]", tds__SetDiscoveryMode->DiscoveryMode);	
 	return SOAP_OK;
 }
 
@@ -551,12 +647,14 @@ SOAP_FMAC5 int SOAP_FMAC6 __tds__SetUser(struct soap* soap, struct _tds__SetUser
 SOAP_FMAC5 int SOAP_FMAC6 __tds__GetWsdlUrl(struct soap* soap, struct _tds__GetWsdlUrl *tds__GetWsdlUrl, struct _tds__GetWsdlUrlResponse *tds__GetWsdlUrlResponse){return SOAP_OK;}
 
 /** Web service operation '__tds__GetCapabilities' implementation, should return SOAP_OK or error code */
-SOAP_FMAC5 int SOAP_FMAC6 __tds__GetCapabilities(struct soap* soap, struct _tds__GetCapabilities *tds__GetCapabilities, struct _tds__GetCapabilitiesResponse *tds__GetCapabilitiesResponse)
+SOAP_FMAC5 int SOAP_FMAC6 __tds__GetCapabilities(struct soap* soap, struct _tds__GetCapabilities *tds__GetCapabilities,
+				struct _tds__GetCapabilitiesResponse *tds__GetCapabilitiesResponse)
 {
 	printf("---------------------------__tds__GetCapabilities---------------------------------------\n");
 
 	if (tds__GetCapabilities->Category[0] == tt__CapabilityCategory__Device ||
-		tds__GetCapabilities->Category[0] == tt__CapabilityCategory__All) {
+		tds__GetCapabilities->Category[0] == tt__CapabilityCategory__All) 
+	{
 		//<Capabilities>
 		tds__GetCapabilitiesResponse->Capabilities = (struct tt__Capabilities *)soap_malloc(soap, sizeof(struct tt__Capabilities));
 		memset(tds__GetCapabilitiesResponse->Capabilities, 0, sizeof(struct tt__Capabilities));
@@ -592,6 +690,7 @@ SOAP_FMAC5 int SOAP_FMAC6 __tds__GetCapabilities(struct soap* soap, struct _tds_
 		tds__GetCapabilitiesResponse->Capabilities->Device->System->DiscoveryBye = xsd__boolean__true_;
 		tds__GetCapabilitiesResponse->Capabilities->Device->System->RemoteDiscovery = xsd__boolean__true_;
 		tds__GetCapabilitiesResponse->Capabilities->Device->System->SystemBackup = xsd__boolean__true_;
+		//tds__GetCapabilitiesResponse->Capabilities->Device->System->SystemLogging = xsd__boolean__false_;
 		tds__GetCapabilitiesResponse->Capabilities->Device->System->SystemLogging = xsd__boolean__true_;
 		tds__GetCapabilitiesResponse->Capabilities->Device->System->FirmwareUpgrade = xsd__boolean__true_;
 		tds__GetCapabilitiesResponse->Capabilities->Device->System->__sizeSupportedVersions = 1;
@@ -641,7 +740,8 @@ SOAP_FMAC5 int SOAP_FMAC6 __tds__GetCapabilities(struct soap* soap, struct _tds_
 
 	//event
 	if (tds__GetCapabilities->Category[0] == tt__CapabilityCategory__Events ||
-		tds__GetCapabilities->Category[0] == tt__CapabilityCategory__All) {
+		tds__GetCapabilities->Category[0] == tt__CapabilityCategory__All)
+	{
 		tds__GetCapabilitiesResponse->Capabilities->Events = (struct tt__EventCapabilities *)soap_malloc(soap, sizeof(struct tt__EventCapabilities));
 		memset(tds__GetCapabilitiesResponse->Capabilities->Events, 0, sizeof(struct tt__EventCapabilities));
 		tds__GetCapabilitiesResponse->Capabilities->Events->XAddr = (char *)soap_malloc(soap, sizeof(char)* 100);
@@ -654,7 +754,8 @@ SOAP_FMAC5 int SOAP_FMAC6 __tds__GetCapabilities(struct soap* soap, struct _tds_
 
 	//image
 	if (tds__GetCapabilities->Category[0] == tt__CapabilityCategory__Imaging ||
-		tds__GetCapabilities->Category[0] == tt__CapabilityCategory__All) {
+		tds__GetCapabilities->Category[0] == tt__CapabilityCategory__All)
+	{
 		tds__GetCapabilitiesResponse->Capabilities->Imaging = (struct tt__ImagingCapabilities *)soap_malloc(soap, sizeof(struct tt__ImagingCapabilities));
 		memset(tds__GetCapabilitiesResponse->Capabilities->Imaging, 0, sizeof(struct tt__ImagingCapabilities));
 		tds__GetCapabilitiesResponse->Capabilities->Imaging->XAddr = (char *)soap_malloc(soap, sizeof(char)* 100);
@@ -664,7 +765,8 @@ SOAP_FMAC5 int SOAP_FMAC6 __tds__GetCapabilities(struct soap* soap, struct _tds_
 
 	//Media
 	if (tds__GetCapabilities->Category[0] == tt__CapabilityCategory__Media ||
-		tds__GetCapabilities->Category[0] == tt__CapabilityCategory__All) {
+		tds__GetCapabilities->Category[0] == tt__CapabilityCategory__All) 
+	{
 		tds__GetCapabilitiesResponse->Capabilities->Media = (struct tt__MediaCapabilities *)soap_malloc(soap, sizeof(struct tt__MediaCapabilities));
 		memset(tds__GetCapabilitiesResponse->Capabilities->Media, 0, sizeof(struct tt__MediaCapabilities));
 		tds__GetCapabilitiesResponse->Capabilities->Media->XAddr = (char *)soap_malloc(soap, sizeof(char)* 100);
